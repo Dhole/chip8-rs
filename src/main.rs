@@ -1,4 +1,6 @@
-use std::ops::{Index, IndexMut};
+use core::ops::{Index, IndexMut};
+
+use rand::Rng;
 
 const SPRITE_CHARS: [[u8; 5]; 0x10] = [
     [0xF0, 0x90, 0x90, 0x90, 0xF0], // 0
@@ -21,9 +23,13 @@ const SPRITE_CHARS: [[u8; 5]; 0x10] = [
 const SPRITE_CHARS_ADDR: u16 = 0x0000;
 const SCREEN_WIDTH: usize = 64;
 const SCREEN_HEIGTH: usize = 32;
+const MEM_SIZE: usize = 0x1000;
+const ROM_ADDR: usize = 0x200;
 
 enum Error {
     InvalidOp(u8, u8),
+    RomTooBig(usize),
+    PcOutOfBounds(u16),
 }
 
 struct Reg(u8);
@@ -44,17 +50,23 @@ impl IndexMut<u8> for Regs {
     }
 }
 
+impl Regs {
+    fn new() -> Self {
+        Self([0; 0x10])
+    }
+}
+
 struct chip8 {
-    mem: [u8; 0x1000],
+    mem: [u8; MEM_SIZE],
     v: Regs, // Register Set
     i: u16,
     pc: u16, // Program Counter
-    stack: [u16; 16],
-    sp: u8,                // Stack Pointer
-    dt: u8,                // Delay Timer
-    st: u8,                // Sound TImer
-    k: u16,                // Keypad
-    fb: [u8; 64 * 32 / 8], // Framebuffer
+    stack: [u16; 0x10],
+    sp: u8,                                     // Stack Pointer
+    dt: u8,                                     // Delay Timer
+    st: u8,                                     // Sound TImer
+    k: u16,                                     // Keypad
+    fb: [u8; SCREEN_WIDTH * SCREEN_HEIGTH / 8], // Framebuffer
 }
 
 macro_rules! nnn {
@@ -64,59 +76,125 @@ macro_rules! nnn {
 }
 
 impl chip8 {
-    fn op_cls(&mut self) {
+    fn new() -> Self {
+        Self {
+            mem: [0; MEM_SIZE],
+            v: Regs::new(),
+            i: 0,
+            pc: ROM_ADDR as u16,
+            stack: [0; 0x10],
+            sp: 0,
+            dt: 0,
+            st: 0,
+            k: 0,
+            fb: [0; SCREEN_WIDTH * SCREEN_HEIGTH / 8],
+        }
+    }
+    fn load_rom(&mut self, rom: &[u8]) -> Result<(), Error> {
+        if rom.len() > MEM_SIZE - ROM_ADDR {
+            return Err(Error::RomTooBig(rom.len()));
+        }
+        self.mem[ROM_ADDR..ROM_ADDR + rom.len()].copy_from_slice(rom);
+        Ok(())
+    }
+    // time is in micro seconds
+    fn frame(&mut self, time: usize) -> Result<usize, Error> {
+        // TODO: Update keyboard state
+        if self.dt != 0 {
+            self.dt -= 1;
+        }
+        if self.st != 0 {
+            // TODO: Continue playing tone
+            self.st -= 1;
+        } else {
+            // TODO: Stop playing tone
+        }
+        let mut rem_time = time as isize;
+        while rem_time <= 0 {
+            if self.pc as usize * 2 > MEM_SIZE - 1 {
+                return Err(Error::PcOutOfBounds(self.pc));
+            }
+            let w0 = self.mem[self.pc as usize * 2];
+            let w1 = self.mem[self.pc as usize * 2 + 1];
+            let adv = self.exec(w0, w1)?;
+            rem_time = rem_time - adv as isize;
+        }
+        // TODO: Draw display
+        Ok((rem_time * -1) as usize)
+    }
+
+    fn op_cls(&mut self) -> usize {
         for b in self.fb.iter_mut() {
             *b = 0;
         }
         self.pc += 1;
+        109
     }
-    fn op_call_rca_1802(&mut self, addr: u16) {}
-    fn op_ret(&mut self) {
+    fn op_call_rca_1802(&mut self, addr: u16) -> usize {
+        100
+    }
+    fn op_ret(&mut self) -> usize {
         self.sp -= 1;
         self.pc = self.stack[self.sp as usize];
+        105
     }
-    fn op_jp(&mut self, addr: u16) {
+    fn op_jp(&mut self, addr: u16) -> usize {
         self.pc = addr;
+        105
     }
-    fn op_call(&mut self, addr: u16) {
+    fn op_call(&mut self, addr: u16) -> usize {
         self.stack[self.sp as usize] = self.pc;
         self.sp += 1;
         self.pc = addr;
+        105
     }
-    fn op_se(&mut self, a: u8, b: u8) {
+    fn op_se(&mut self, a: u8, b: u8) -> usize {
         if a == b {
             self.pc += 2;
         } else {
             self.pc += 1;
         }
+        61
     }
-    fn op_sne(&mut self, a: u8, b: u8) {
+    fn op_sne(&mut self, a: u8, b: u8) -> usize {
         if a != b {
             self.pc += 2;
         } else {
             self.pc += 1;
         }
+        61
     }
-    fn op_ld(&mut self, r: Reg, v: u8) {
+    fn op_ld(&mut self, r: Reg, v: u8) -> usize {
         self.v[r.0] = v;
         self.pc += 1;
+        27
     }
-    fn op_ld_vx_k(&mut self, v: u8) {
-        unimplemented!();
+    fn op_ld_vx_k(&mut self, r: Reg) -> usize {
+        for i in 0..0x10 {
+            if 1 << i & self.k != 0 {
+                self.v[r.0] = i as u8;
+                self.pc += 1;
+                break;
+            }
+        }
+        200
     }
-    fn op_ld_dt(&mut self, v: u8) {
+    fn op_ld_dt(&mut self, v: u8) -> usize {
         self.dt = v;
         self.pc += 1;
+        45
     }
-    fn op_ld_st(&mut self, v: u8) {
+    fn op_ld_st(&mut self, v: u8) -> usize {
         self.st = v;
         self.pc += 1;
+        45
     }
-    fn op_ld_f(&mut self, v: u8) {
+    fn op_ld_f(&mut self, v: u8) -> usize {
         self.i = SPRITE_CHARS_ADDR + v as u16 * 5;
         self.pc += 1;
+        91
     }
-    fn op_ld_b(&mut self, v: u8) {
+    fn op_ld_b(&mut self, v: u8) -> usize {
         let d2 = (v - 0) / 100;
         let d1 = (v - d2) / 10;
         let d0 = (v - d1) / 1;
@@ -124,74 +202,88 @@ impl chip8 {
         self.mem[self.i as usize + 1] = d1;
         self.mem[self.i as usize + 2] = d0;
         self.pc += 1;
+        927
     }
-    fn op_ld_i_vx(&mut self, x: u8) {
+    fn op_ld_i_vx(&mut self, x: u8) -> usize {
         for i in 0..x {
             self.mem[self.i as usize + i as usize] = self.v[i];
         }
         self.pc += 1;
+        605
     }
-    fn op_ld_vx_i(&mut self, x: u8) {
+    fn op_ld_vx_i(&mut self, x: u8) -> usize {
         for i in 0..x {
             self.v[i] = self.mem[self.i as usize + i as usize];
         }
         self.pc += 1;
+        605
     }
-    fn op_add(&mut self, a: Reg, b: u8) {
+    fn op_add(&mut self, a: Reg, b: u8) -> usize {
         let (res, overflow) = self.v[a.0].overflowing_add(b);
         self.v[a.0] = res;
         self.v[0xf] = if overflow { 1 } else { 0 };
         self.pc += 1;
+        45
     }
-    fn op_add16(&mut self, b: u8) {
+    fn op_add16(&mut self, b: u8) -> usize {
         self.i += b as u16;
         self.pc += 1;
+        86
     }
-    fn op_or(&mut self, a: Reg, b: u8) {
+    fn op_or(&mut self, a: Reg, b: u8) -> usize {
         self.v[a.0] |= b;
         self.pc += 1;
+        200
     }
-    fn op_and(&mut self, a: Reg, b: u8) {
+    fn op_and(&mut self, a: Reg, b: u8) -> usize {
         self.v[a.0] &= b;
         self.pc += 1;
+        200
     }
-    fn op_xor(&mut self, a: Reg, b: u8) {
+    fn op_xor(&mut self, a: Reg, b: u8) -> usize {
         self.v[a.0] ^= b;
         self.pc += 1;
+        200
     }
-    fn op_sub(&mut self, a: Reg, b: u8) {
+    fn op_sub(&mut self, a: Reg, b: u8) -> usize {
         let (res, overflow) = self.v[a.0].overflowing_sub(b);
         self.v[a.0] = res;
         self.v[0xf] = if overflow { 0 } else { 1 };
         self.pc += 1;
+        200
     }
-    fn op_subn(&mut self, a: Reg, b: u8) {
+    fn op_subn(&mut self, a: Reg, b: u8) -> usize {
         let (res, overflow) = b.overflowing_sub(self.v[a.0]);
         self.v[a.0] = res;
         self.v[0xf] = if overflow { 0 } else { 1 };
         self.pc += 1;
+        200
     }
-    fn op_shr(&mut self, a: Reg, b: u8) {
+    fn op_shr(&mut self, a: Reg, b: u8) -> usize {
         let (res, overflow) = b.overflowing_shr(self.v[a.0] as u32);
         self.v[a.0] = res;
         self.v[0xf] = if overflow { 0 } else { 1 };
         self.pc += 1;
+        200
     }
-    fn op_shl(&mut self, a: Reg, b: u8) {
+    fn op_shl(&mut self, a: Reg, b: u8) -> usize {
         let (res, overflow) = b.overflowing_shl(self.v[a.0] as u32);
         self.v[a.0] = res;
         self.v[0xf] = if overflow { 0 } else { 1 };
         self.pc += 1;
+        200
     }
-    fn op_ld_i(&mut self, addr: u16) {
+    fn op_ld_i(&mut self, addr: u16) -> usize {
         self.i = addr;
         self.pc += 1;
+        55
     }
-    fn op_rnd(&mut self, r: Reg, v: u8) {
-        unimplemented!();
+    fn op_rnd(&mut self, r: Reg, v: u8) -> usize {
+        self.v[r.0] = rand::random::<u8>() & v;
         self.pc += 1;
+        164
     }
-    fn op_drw(&mut self, pos_x: u8, pos_y: u8, n: u8) {
+    fn op_drw(&mut self, pos_x: u8, pos_y: u8, n: u8) -> usize {
         let shift = pos_x % 8;
         let col_a = pos_x as usize / 8;
         let col_b = (col_a + 1) % SCREEN_WIDTH;
@@ -210,23 +302,26 @@ impl chip8 {
         }
         self.v[0xF] = if collision != 0 { 1 } else { 0 };
         self.pc += 1;
+        22734
     }
-    fn op_skp(&mut self, v: u8) {
+    fn op_skp(&mut self, v: u8) -> usize {
         if 1 << v & self.k != 0 {
             self.pc += 2;
         } else {
             self.pc += 1;
         }
+        73
     }
-    fn op_sknp(&mut self, v: u8) {
+    fn op_sknp(&mut self, v: u8) -> usize {
         if 1 << v & self.k == 0 {
             self.pc += 2;
         } else {
             self.pc += 1;
         }
+        73
     }
-    fn exec(&mut self, w0: u8, w1: u8) -> Result<(), Error> {
-        match w0 & 0xf0 {
+    fn exec(&mut self, w0: u8, w1: u8) -> Result<usize, Error> {
+        Ok(match w0 & 0xf0 {
             0x00 => match w1 {
                 0xe0 => self.op_cls(),
                 0xee => self.op_ret(),
@@ -281,11 +376,59 @@ impl chip8 {
                 _ => return Err(Error::InvalidOp(w0, w1)),
             },
             _ => return Err(Error::InvalidOp(w0, w1)),
-        }
-        Ok(())
+        })
     }
 }
 
-fn main() {
-    println!("Hello, world!");
+use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
+use sdl2::pixels::Color;
+use sdl2::rect::Rect;
+use std::time::Duration;
+
+pub fn main() -> Result<(), String> {
+    let sdl_context = sdl2::init()?;
+    let video_subsystem = sdl_context.video()?;
+
+    let zoom = 8;
+    let window = video_subsystem
+        .window(
+            "rust-sdl2 demo: Video",
+            SCREEN_WIDTH as u32 * zoom,
+            SCREEN_HEIGTH as u32 * zoom,
+        )
+        .position_centered()
+        .opengl()
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
+
+    canvas.set_draw_color(Color::RGB(0, 0, 0));
+    canvas.clear();
+    canvas.present();
+    let mut event_pump = sdl_context.event_pump()?;
+
+    'running: loop {
+        for event in event_pump.poll_iter() {
+            match event {
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => break 'running,
+                _ => {}
+            }
+        }
+
+        canvas.set_draw_color(Color::RGB(0, 0, 0));
+        canvas.clear();
+        canvas.set_draw_color(Color::RGB(255, 255, 255));
+        canvas.fill_rect(Rect::new(0, 0, 8, 8))?;
+        canvas.present();
+        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+        // The rest of the game loop goes here...
+    }
+
+    Ok(())
 }
