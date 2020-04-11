@@ -1,0 +1,42 @@
+[package]
+authors = ["Dhole <dhole@riseup.net>"]
+edition = "2018"
+name = "stm32"
+version = "0.1.0"
+[[bin]]
+bench = false
+name = "stm32"
+test = false
+
+[dependencies]
+nb = "0.1.2"
+cortex-m = "0.6.2"
+cortex-m-rt = "0.6.11"
+# Panic behaviour, see https://crates.io/keywords/panic-impl for alternatives
+panic-halt = "0.2.0"
+pcd8544-hal = { path = "../pcd8544-hal" }
+chip8 = { path = "../chip8" }
+
+[dependencies.arrayvec]
+version = "0.5.1"
+default-features = false
+
+[dependencies.stm32f1xx-hal]
+version = "0.5.3"
+features = ["stm32f103", "rt"]
+
+[dependencies.embedded-hal]
+version = "0.2.3"
+features = ["unproven"]
+
+[profile.dev]
+opt-level = 3
+# opt-level = "z" # +
+#codegen-units = 1 # better optimizations
+debug = true # symbols are nice and they don't increase the size on Flash
+lto = true # better optimizations
+
+[profile.release]
+codegen-units = 1 # better optimizations
+debug = true # symbols are nice and they don't increase the size on Flash
+lto = true # better optimizations

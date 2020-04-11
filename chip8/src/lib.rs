@@ -1,6 +1,9 @@
+#![no_std]
+
 use core::ops::{Index, IndexMut};
 
-use rand::Rng;
+use rand::rngs::SmallRng;
+use rand::{RngCore, SeedableRng};
 
 const SPRITE_CHARS: [[u8; 5]; 0x10] = [
     [0xF0, 0x90, 0x90, 0x90, 0xF0], // 0
@@ -21,8 +24,8 @@ const SPRITE_CHARS: [[u8; 5]; 0x10] = [
     [0xF0, 0x80, 0xF0, 0x80, 0x80], // F
 ];
 const SPRITE_CHARS_ADDR: u16 = 0x0000;
-const SCREEN_WIDTH: usize = 64;
-const SCREEN_HEIGTH: usize = 32;
+pub const SCREEN_WIDTH: usize = 64;
+pub const SCREEN_HEIGTH: usize = 32;
 const MEM_SIZE: usize = 0x1000;
 const ROM_ADDR: usize = 0x200;
 
@@ -58,19 +61,18 @@ impl Regs {
     }
 }
 
-struct Chip8 {
+pub struct Chip8<R: RngCore> {
     mem: [u8; MEM_SIZE],
     v: Regs, // Register Set
     i: u16,
     pc: u16, // Program Counter
     stack: [u16; 0x10],
-    sp: u8,                                           // Stack Pointer
-    dt: u8,                                           // Delay Timer
-    st: u8,                                           // Sound TImer
-    pub k: u16,                                       // Keypad
-    pub fb_a: [u8; SCREEN_WIDTH * SCREEN_HEIGTH / 8], // Framebuffer A
-    pub fb_b: [u8; SCREEN_WIDTH * SCREEN_HEIGTH / 8], // Framebuffer B
-    fb_current: u8,
+    sp: u8,                                         // Stack Pointer
+    dt: u8,                                         // Delay Timer
+    st: u8,                                         // Sound TImer
+    pub k: u16,                                     // Keypad
+    pub fb: [u8; SCREEN_WIDTH * SCREEN_HEIGTH / 8], // Framebuffer
+    rng: R,
 }
 
 macro_rules! nnn {
@@ -84,10 +86,15 @@ pub struct Output {
     pub overtime: usize,
 }
 
-impl Chip8 {
-    fn new() -> Self {
+impl Chip8<SmallRng> {
+    pub fn new(seed: u64) -> Self {
+        let mut mem = [0; MEM_SIZE];
+        for (i, sprite) in SPRITE_CHARS.iter().enumerate() {
+            let p = SPRITE_CHARS_ADDR as usize + i * sprite.len();
+            mem[p..p + sprite.len()].copy_from_slice(sprite)
+        }
         Self {
-            mem: [0; MEM_SIZE],
+            mem: mem,
             v: Regs::new(),
             i: 0,
             pc: ROM_ADDR as u16,
@@ -96,12 +103,14 @@ impl Chip8 {
             dt: 0,
             st: 0,
             k: 0,
-            fb_a: [0; SCREEN_WIDTH * SCREEN_HEIGTH / 8],
-            fb_b: [0; SCREEN_WIDTH * SCREEN_HEIGTH / 8],
-            fb_current: 0,
+            fb: [0; SCREEN_WIDTH * SCREEN_HEIGTH / 8],
+            rng: rand::rngs::SmallRng::seed_from_u64(seed),
         }
     }
-    fn load_rom(&mut self, rom: &[u8]) -> Result<(), Error> {
+}
+
+impl<R: RngCore> Chip8<R> {
+    pub fn load_rom(&mut self, rom: &[u8]) -> Result<(), Error> {
         if rom.len() > MEM_SIZE - ROM_ADDR {
             return Err(Error::RomTooBig(rom.len()));
         }
@@ -110,7 +119,7 @@ impl Chip8 {
         Ok(())
     }
     // time is in micro seconds
-    fn frame(&mut self, time: usize) -> Result<Output, Error> {
+    pub fn frame(&mut self, time: usize) -> Result<Output, Error> {
         if self.dt != 0 {
             self.dt -= 1;
         }
@@ -122,13 +131,8 @@ impl Chip8 {
         };
         let mut rem_time = time as isize;
 
-        if self.fb_current == 0 {
-            self.fb_a.copy_from_slice(&self.fb_b);
-        } else {
-            self.fb_b.copy_from_slice(&self.fb_a);
-        }
         while rem_time > 0 {
-            if self.pc as usize * 2 > MEM_SIZE - 1 {
+            if self.pc as usize > MEM_SIZE - 1 {
                 return Err(Error::PcOutOfBounds(self.pc));
             }
             let w0 = self.mem[self.pc as usize];
@@ -140,7 +144,6 @@ impl Chip8 {
             let adv = self.exec(w0, w1)?;
             rem_time = rem_time - adv as isize;
         }
-        self.fb_current = (self.fb_current + 1) % 2;
         Ok(Output {
             tone,
             overtime: (rem_time * -1) as usize,
@@ -148,10 +151,7 @@ impl Chip8 {
     }
 
     fn op_cls(&mut self) -> usize {
-        for b in self.fb_a.iter_mut() {
-            *b = 0;
-        }
-        for b in self.fb_b.iter_mut() {
+        for b in self.fb.iter_mut() {
             *b = 0;
         }
         self.pc += 2;
@@ -309,17 +309,15 @@ impl Chip8 {
         55
     }
     fn op_rnd(&mut self, r: Reg, v: u8) -> usize {
-        self.v[r.0] = rand::random::<u8>() & v;
+        self.v[r.0] = (self.rng.next_u32() as u8) & v;
         self.pc += 2;
         164
     }
     fn op_drw(&mut self, pos_x: u8, pos_y: u8, n: u8) -> usize {
         // println!("DRAW ({}, {})", pos_x, pos_y);
-        let mut fb = if self.fb_current == 0 {
-            &mut self.fb_a
-        } else {
-            &mut self.fb_b
-        };
+        let pos_x = pos_x % 64;
+        let pos_y = pos_y % 32;
+        let mut fb = &mut self.fb;
         let shift = pos_x % 8;
         let col_a = pos_x as usize / 8;
         let col_b = (col_a + 1) % (SCREEN_WIDTH / 8);
@@ -424,221 +422,4 @@ impl Chip8 {
             _ => return Err(Error::InvalidOp(w0, w1)),
         })
     }
-}
-
-use sdl2::audio::{AudioCallback, AudioSpecDesired};
-use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
-use sdl2::pixels::Color;
-use sdl2::rect::Rect;
-
-use clap::{App, Arg, SubCommand};
-
-use std::fs;
-use std::io::{self, Read};
-use std::time::Duration;
-
-#[derive(Debug)]
-pub enum FrontError {
-    Chip8(Error),
-    SDL2(String),
-    Io(io::Error),
-}
-
-impl From<Error> for FrontError {
-    fn from(err: Error) -> Self {
-        Self::Chip8(err)
-    }
-}
-
-impl From<io::Error> for FrontError {
-    fn from(err: io::Error) -> Self {
-        Self::Io(err)
-    }
-}
-
-impl From<String> for FrontError {
-    fn from(err: String) -> Self {
-        Self::SDL2(err)
-    }
-}
-
-struct SquareWave {
-    phase_inc: f32,
-    phase: f32,
-    volume: f32,
-}
-
-impl AudioCallback for SquareWave {
-    type Channel = f32;
-
-    fn callback(&mut self, out: &mut [f32]) {
-        // Generate a square wave
-        for x in out.iter_mut() {
-            *x = if self.phase <= 0.5 {
-                self.volume
-            } else {
-                -self.volume
-            };
-            self.phase = (self.phase + self.phase_inc) % 1.0;
-        }
-    }
-}
-
-pub fn main() -> Result<(), FrontError> {
-    let app = App::new("Chip8-rs")
-        .version("0.0.1")
-        .author("Dhole")
-        .arg(
-            Arg::with_name("scale")
-                .short("s")
-                .long("scale")
-                .value_name("N")
-                .help("Sets the scaling factor")
-                .takes_value(true)
-                .default_value("8")
-                .validator(|scale| match scale.parse::<u32>() {
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(format!("{}", e)),
-                }),
-        )
-        .arg(
-            Arg::with_name("path")
-                .help("Path to the rom file")
-                .index(1)
-                .required(true),
-        )
-        .get_matches();
-
-    let scale = app
-        .value_of("scale")
-        .map(|s| s.parse::<u32>().unwrap())
-        .unwrap();
-    let path = app.value_of("path").unwrap();
-
-    let mut rom = Vec::new();
-    fs::OpenOptions::new()
-        .read(true)
-        .open(path)?
-        .read_to_end(&mut rom)?;
-
-    // println!("rom {:02x}{:02x}", rom[0], rom[1]);
-
-    let mut chip8 = Chip8::new();
-    chip8.load_rom(&rom)?;
-    run(scale, &mut chip8)
-}
-
-fn run(scale: u32, chip8: &mut Chip8) -> Result<(), FrontError> {
-    let sdl_context = sdl2::init()?;
-    let video_subsystem = sdl_context.video()?;
-    let audio_subsystem = sdl_context.audio().unwrap();
-
-    let desired_spec = AudioSpecDesired {
-        freq: Some(44100),
-        channels: Some(1), // mono
-        samples: None,     // default sample size
-    };
-
-    let device = audio_subsystem
-        .open_playback(None, &desired_spec, |spec| {
-            // initialize the audio callback
-            SquareWave {
-                phase_inc: 440.0 / spec.freq as f32,
-                phase: 0.0,
-                volume: 0.25,
-            }
-        })
-        .unwrap();
-
-    let window = video_subsystem
-        .window(
-            "chip8-rs",
-            SCREEN_WIDTH as u32 * scale,
-            SCREEN_HEIGTH as u32 * scale,
-        )
-        .position_centered()
-        .opengl()
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
-
-    canvas.set_draw_color(Color::RGB(0, 0, 0));
-    canvas.clear();
-    canvas.present();
-    let mut event_pump = sdl_context.event_pump()?;
-
-    'running: loop {
-        let mut k = 0 as u16;
-        for event in event_pump.poll_iter() {
-            match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => break 'running,
-                Event::KeyDown {
-                    keycode: Some(keycode),
-                    ..
-                } => {
-                    k |= match keycode {
-                        Keycode::Num1 => 1 << 0x1,
-                        Keycode::Num2 => 1 << 0x2,
-                        Keycode::Num3 => 1 << 0x3,
-                        Keycode::Num4 => 1 << 0xC,
-                        Keycode::Q => 1 << 0x4,
-                        Keycode::W => 1 << 0x5,
-                        Keycode::E => 1 << 0x6,
-                        Keycode::R => 1 << 0xD,
-                        Keycode::A => 1 << 0x7,
-                        Keycode::S => 1 << 0x8,
-                        Keycode::D => 1 << 0x9,
-                        Keycode::F => 1 << 0xE,
-                        Keycode::Z => 1 << 0xA,
-                        Keycode::X => 1 << 0x0,
-                        Keycode::C => 1 << 0xB,
-                        Keycode::V => 1 << 0xF,
-                        _ => 0,
-                    };
-                }
-                _ => {}
-            }
-        }
-
-        chip8.k = k;
-        let out = chip8.frame(16666)?;
-        if out.tone {
-            device.resume();
-        } else {
-            device.pause();
-        }
-
-        canvas.set_draw_color(Color::RGB(0, 0, 0));
-        canvas.clear();
-        canvas.set_draw_color(Color::RGB(255, 255, 255));
-
-        for y in 0..SCREEN_HEIGTH {
-            for x in 0..SCREEN_WIDTH / 8 {
-                let byte =
-                    chip8.fb_a[y * SCREEN_WIDTH / 8 + x] | chip8.fb_b[y * SCREEN_WIDTH / 8 + x];
-                for i in 0..8 {
-                    if byte & 1 << (7 - i) != 0 {
-                        canvas.fill_rect(Rect::new(
-                            (x * 8 + i) as i32 * scale as i32,
-                            y as i32 * scale as i32,
-                            scale,
-                            scale,
-                        ))?;
-                    }
-                }
-            }
-        }
-
-        canvas.present();
-        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
-        // The rest of the game loop goes here...
-    }
-
-    Ok(())
 }

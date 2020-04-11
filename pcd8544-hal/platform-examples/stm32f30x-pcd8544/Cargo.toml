@@ -1,0 +1,29 @@
+[package]
+authors = ["Hannu Hartikainen <hannu.hartikainen@gmail.com>"]
+name = "stm32f30x-pcd8544"
+version = "0.1.0"
+
+[dependencies]
+embedded-hal = "0.1.2"
+
+[dependencies.cortex-m]
+version = "0.4.0"
+
+[dependencies.cortex-m-rt]
+features = ["abort-on-panic"]
+version = "0.3.12"
+
+[dependencies.pcd8544-hal]
+path = "../.."
+
+[dependencies.stm32f30x-hal]
+features = ["rt"]
+version = "0.1.2"
+
+[profile.dev]
+codegen-units = 1
+incremental = false
+
+[profile.release]
+debug = true
+lto = true

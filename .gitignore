@@ -1,1 +1,4 @@
+/games
 /target
+stm32.bin
+.gdb_history

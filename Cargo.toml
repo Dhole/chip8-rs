@@ -1,12 +1,8 @@
-[package]
-name = "chip8"
-version = "0.1.0"
-authors = ["Dhole <dhole@riseup.net>"]
-edition = "2018"
+[workspace]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-rand = "0.7.3"
-sdl2 = "0.33"
-clap = "2.33.0"
+members = [
+    "chip8",
+    "sdl",
+    "stm32",
+    "pcd8544-hal",
+]
