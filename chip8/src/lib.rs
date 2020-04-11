@@ -115,7 +115,6 @@ impl<R: RngCore> Chip8<R> {
             return Err(Error::RomTooBig(rom.len()));
         }
         self.mem[ROM_ADDR..ROM_ADDR + rom.len()].copy_from_slice(rom);
-        // println!("load_rom {:02x}{:02}", self.mem[0x200], self.mem[0x201]);
         Ok(())
     }
     // time is in micro seconds
@@ -137,10 +136,6 @@ impl<R: RngCore> Chip8<R> {
             }
             let w0 = self.mem[self.pc as usize];
             let w1 = self.mem[self.pc as usize + 1];
-            // println!(
-            //     "{:04x}: {:02x}{:02x} v0: {} v1: {}",
-            //     self.pc, w0, w1, self.v[0], self.v[1]
-            // );
             let adv = self.exec(w0, w1)?;
             rem_time = rem_time - adv as isize;
         }
@@ -163,7 +158,6 @@ impl<R: RngCore> Chip8<R> {
     fn op_ret(&mut self) -> usize {
         self.sp -= 1;
         self.pc = self.stack[self.sp as usize];
-        // panic!("DBG");
         105
     }
     fn op_jp(&mut self, addr: u16) -> usize {
@@ -314,7 +308,6 @@ impl<R: RngCore> Chip8<R> {
         164
     }
     fn op_drw(&mut self, pos_x: u8, pos_y: u8, n: u8) -> usize {
-        // println!("DRAW ({}, {})", pos_x, pos_y);
         let pos_x = pos_x % 64;
         let pos_y = pos_y % 32;
         let mut fb = &mut self.fb;
@@ -329,7 +322,6 @@ impl<R: RngCore> Chip8<R> {
             let fb_a = &mut fb[y * SCREEN_WIDTH / 8 + col_a];
             collision |= *fb_a & a;
             *fb_a ^= a;
-            // println!("{:08b} {:08b}", byte, *fb_a);
             if shift != 0 {
                 let b = byte << (8 - shift);
                 let fb_b = &mut fb[y * SCREEN_WIDTH / 8 + col_b];
@@ -337,13 +329,6 @@ impl<R: RngCore> Chip8<R> {
                 *fb_b ^= b;
             }
         }
-        // DBG
-        // for y in 0..SCREEN_HEIGTH {
-        //     for x in 0..SCREEN_WIDTH / 8 {
-        //         print!("{:08b}", self.fb[y * SCREEN_WIDTH / 8 + x]);
-        //     }
-        //     println!();
-        // }
         self.v[0xF] = if collision != 0 { 1 } else { 0 };
         self.pc += 2;
         22734
