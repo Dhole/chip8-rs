@@ -204,16 +204,16 @@ fn main() -> ! {
     let mut pcd8544 = Pcd8544Spi::new(spi, dc, cs, &mut rst, &mut delay);
 
     let mut keypad_r = [
-        gpiob.pb12.into_push_pull_output(&mut gpiob.crh).downgrade(),
-        gpiob.pb13.into_push_pull_output(&mut gpiob.crh).downgrade(),
-        gpiob.pb14.into_push_pull_output(&mut gpiob.crh).downgrade(),
-        gpiob.pb15.into_push_pull_output(&mut gpiob.crh).downgrade(),
+        gpioa.pa11.into_push_pull_output(&mut gpioa.crh).downgrade(),
+        gpioa.pa10.into_push_pull_output(&mut gpioa.crh).downgrade(),
+        gpioa.pa9.into_push_pull_output(&mut gpioa.crh).downgrade(),
+        gpioa.pa8.into_push_pull_output(&mut gpioa.crh).downgrade(),
     ];
     let mut keypad_c = [
-        gpioa.pa8.into_pull_down_input(&mut gpioa.crh).downgrade(),
-        gpioa.pa9.into_pull_down_input(&mut gpioa.crh).downgrade(),
-        gpioa.pa10.into_pull_down_input(&mut gpioa.crh).downgrade(),
-        gpioa.pa11.into_pull_down_input(&mut gpioa.crh).downgrade(),
+        gpiob.pb15.into_pull_down_input(&mut gpiob.crh).downgrade(),
+        gpiob.pb14.into_pull_down_input(&mut gpiob.crh).downgrade(),
+        gpiob.pb13.into_pull_down_input(&mut gpiob.crh).downgrade(),
+        gpiob.pb12.into_pull_down_input(&mut gpiob.crh).downgrade(),
     ];
 
     // TIM2 PWM
@@ -339,6 +339,7 @@ fn main() -> ! {
     const DISP_WIDTH: usize = 84;
     const DISP_HEIGHT: usize = 48;
     let mut disp_fb = [0; DISP_WIDTH * DISP_HEIGHT / 8];
+    let mut fb_prev = [0; chip8::SCREEN_HEIGTH * chip8::SCREEN_WIDTH / 8];
     // let mut overtime: usize = 0;
     loop {
         block!(timer.wait()).unwrap();
@@ -358,7 +359,8 @@ fn main() -> ! {
         }
         for y in 0..chip8::SCREEN_HEIGTH {
             for x in 0..chip8::SCREEN_WIDTH / 8 {
-                let byte = chip8.fb[y * chip8::SCREEN_WIDTH / 8 + x];
+                let byte = chip8.fb[y * chip8::SCREEN_WIDTH / 8 + x]
+                    | fb_prev[y * chip8::SCREEN_WIDTH / 8 + x];
                 for i in 0..8 {
                     let b = (byte & (1 << i)) >> i << (y % 8);
                     disp_fb[(10 + x * 8 + 7 - i) * DISP_HEIGHT / 8 + y / 8] |= b;
@@ -366,6 +368,7 @@ fn main() -> ! {
                 // disp_fb[y * DISP_WIDTH / 8 + 1 + x] = byte;
             }
         }
+        fb_prev.copy_from_slice(&chip8.fb);
         pcd8544.draw_buffer(&disp_fb);
         led.toggle();
     }
