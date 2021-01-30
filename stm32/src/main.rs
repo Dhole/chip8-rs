@@ -1,5 +1,5 @@
-#![deny(unsafe_code)]
 #![no_std]
+#![deny(unsafe_code)]
 #![no_main]
 
 use core::fmt::Write;

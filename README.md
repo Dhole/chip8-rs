@@ -27,6 +27,7 @@ Entertainment System for the Post Apocalypse*.
 
 Build
 ```
+cd sdl
 cargo build --target x86_64-unknown-linux-gnu --bin sdl
 ```
 
@@ -34,6 +35,7 @@ cargo build --target x86_64-unknown-linux-gnu --bin sdl
 
 Build
 ```
+cd stm32
 cargo build --bin stm32 --release
 ```
 
