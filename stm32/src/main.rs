@@ -344,9 +344,8 @@ fn main() -> ! {
     loop {
         block!(timer.wait()).unwrap();
         let key = key_map(key_pressed(&mut keypad_r, &mut keypad_c));
-        chip8.k = key;
-        let out = chip8.frame(frame_us).unwrap();
-        if out.tone {
+        chip8.frame(key).unwrap();
+        if chip8.tone() {
             pwm_tone.enable();
         } else {
             pwm_tone.disable();
@@ -359,7 +358,7 @@ fn main() -> ! {
         }
         for y in 0..chip8::SCREEN_HEIGTH {
             for x in 0..chip8::SCREEN_WIDTH / 8 {
-                let byte = chip8.fb[y * chip8::SCREEN_WIDTH / 8 + x]
+                let byte = chip8.fb()[y * chip8::SCREEN_WIDTH / 8 + x]
                     | fb_prev[y * chip8::SCREEN_WIDTH / 8 + x];
                 for i in 0..8 {
                     let b = (byte & (1 << i)) >> i << (y % 8);
@@ -368,7 +367,7 @@ fn main() -> ! {
                 // disp_fb[y * DISP_WIDTH / 8 + 1 + x] = byte;
             }
         }
-        fb_prev.copy_from_slice(&chip8.fb);
+        fb_prev.copy_from_slice(&chip8.fb());
         pcd8544.draw_buffer(&disp_fb);
         led.toggle();
     }

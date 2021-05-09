@@ -1,5 +1,8 @@
 #![no_std]
 
+//! Op descriptions are taken from Cowgod's Chip-8 Technical Reference v1.0  compiled by Thomas P.
+//! Greene: http://devernay.free.fr/hacks/chip8/C8TECH10.HTM
+
 use core::ops::{Index, IndexMut};
 
 use rand::rngs::SmallRng;
@@ -37,21 +40,31 @@ pub enum Error {
     Debug,
 }
 
+/// Returns low nibble from byte
+fn lo_nib(b: u8) -> u8 {
+    b & 0x0f
+}
+/// Returns high nibble from byte
+fn hi_nib(b: u8) -> u8 {
+    (b & 0xf0) >> 4
+}
+
+#[derive(Clone, Copy)]
 struct Reg(u8);
 
 struct Regs([u8; 0x10]);
 
-impl Index<u8> for Regs {
+impl Index<Reg> for Regs {
     type Output = u8;
 
-    fn index(&self, reg: u8) -> &Self::Output {
-        &self.0[reg as usize]
+    fn index(&self, reg: Reg) -> &Self::Output {
+        &self.0[reg.0 as usize]
     }
 }
 
-impl IndexMut<u8> for Regs {
-    fn index_mut(&mut self, reg: u8) -> &mut Self::Output {
-        &mut self.0[reg as usize]
+impl IndexMut<Reg> for Regs {
+    fn index_mut(&mut self, reg: Reg) -> &mut Self::Output {
+        &mut self.0[reg.0 as usize]
     }
 }
 
@@ -61,17 +74,21 @@ impl Regs {
     }
 }
 
+const FRAME_TIME: isize = 16666; // In microseconds
+
 pub struct Chip8<R: RngCore> {
     mem: [u8; MEM_SIZE],
     v: Regs, // Register Set
-    i: u16,
+    i: u16,  // Index Register
     pc: u16, // Program Counter
     stack: [u16; 0x10],
-    sp: u8,                                         // Stack Pointer
-    dt: u8,                                         // Delay Timer
-    st: u8,                                         // Sound TImer
-    pub k: u16,                                     // Keypad
-    pub fb: [u8; SCREEN_WIDTH * SCREEN_HEIGTH / 8], // Framebuffer
+    sp: u8,                                     // Stack Pointer
+    dt: u8,                                     // Delay Timer
+    st: u8,                                     // Sound Timer
+    keypad: u16,                                // Keypad
+    fb: [u8; SCREEN_WIDTH * SCREEN_HEIGTH / 8], // Framebuffer
+    tone: bool,                                 // Tone output enable
+    time: isize,                                // Overtime in microseconds
     rng: R,
 }
 
@@ -94,7 +111,7 @@ impl Chip8<SmallRng> {
             mem[p..p + sprite.len()].copy_from_slice(sprite)
         }
         Self {
-            mem: mem,
+            mem,
             v: Regs::new(),
             i: 0,
             pc: ROM_ADDR as u16,
@@ -102,14 +119,17 @@ impl Chip8<SmallRng> {
             sp: 0,
             dt: 0,
             st: 0,
-            k: 0,
+            keypad: 0,
             fb: [0; SCREEN_WIDTH * SCREEN_HEIGTH / 8],
+            tone: false,
+            time: 0,
             rng: rand::rngs::SmallRng::seed_from_u64(seed),
         }
     }
 }
 
 impl<R: RngCore> Chip8<R> {
+    /// Load a rom into Chip8 memory
     pub fn load_rom(&mut self, rom: &[u8]) -> Result<(), Error> {
         if rom.len() > MEM_SIZE - ROM_ADDR {
             return Err(Error::RomTooBig(rom.len()));
@@ -117,34 +137,42 @@ impl<R: RngCore> Chip8<R> {
         self.mem[ROM_ADDR..ROM_ADDR + rom.len()].copy_from_slice(rom);
         Ok(())
     }
-    // time is in micro seconds
-    pub fn frame(&mut self, time: usize) -> Result<Output, Error> {
+    /// Whether a tone must be played
+    pub fn tone(&self) -> bool {
+        self.tone
+    }
+    /// Framebuffer view
+    pub fn fb(&self) -> [u8; SCREEN_WIDTH * SCREEN_HEIGTH / 8] {
+        self.fb
+    }
+    /// Emulates the execution of instructions continuously until the emulated instructions total
+    /// elapsed time reaches the equivalent of a frame.
+    pub fn frame(&mut self, keypad: u16) -> Result<(), Error> {
+        self.keypad = keypad;
         if self.dt != 0 {
             self.dt -= 1;
         }
-        let tone = if self.st != 0 {
+        self.tone = if self.st != 0 {
             self.st -= 1;
             true
         } else {
             false
         };
-        let mut rem_time = time as isize;
+        self.time += FRAME_TIME;
 
-        while rem_time > 0 {
+        while self.time > 0 {
             if self.pc as usize > MEM_SIZE - 1 {
                 return Err(Error::PcOutOfBounds(self.pc));
             }
             let w0 = self.mem[self.pc as usize];
             let w1 = self.mem[self.pc as usize + 1];
             let adv = self.exec(w0, w1)?;
-            rem_time = rem_time - adv as isize;
+            self.time -= adv as isize;
         }
-        Ok(Output {
-            tone,
-            overtime: (rem_time * -1) as usize,
-        })
+        Ok(())
     }
 
+    /// Op: Clear the display.
     fn op_cls(&mut self) -> usize {
         for b in self.fb.iter_mut() {
             *b = 0;
@@ -152,24 +180,28 @@ impl<R: RngCore> Chip8<R> {
         self.pc += 2;
         109
     }
-    fn op_call_rca_1802(&mut self, addr: u16) -> usize {
+    fn op_call_rca_1802(&mut self, _addr: u16) -> usize {
         100
     }
+    /// Op: Return from a subroutine.
     fn op_ret(&mut self) -> usize {
         self.sp -= 1;
         self.pc = self.stack[self.sp as usize];
         105
     }
+    /// Op: Jump to addr.
     fn op_jp(&mut self, addr: u16) -> usize {
         self.pc = addr;
         105
     }
+    /// Op: Call subroutine at addr.
     fn op_call(&mut self, addr: u16) -> usize {
         self.stack[self.sp as usize] = self.pc + 2;
         self.sp += 1;
         self.pc = addr;
         105
     }
+    /// Op: Skip next instruction if a == b.
     fn op_se(&mut self, a: u8, b: u8) -> usize {
         if a == b {
             self.pc += 4;
@@ -178,6 +210,7 @@ impl<R: RngCore> Chip8<R> {
         }
         61
     }
+    /// Op: Skip next instruction if a != b.
     fn op_sne(&mut self, a: u8, b: u8) -> usize {
         if a != b {
             self.pc += 4;
@@ -186,36 +219,43 @@ impl<R: RngCore> Chip8<R> {
         }
         61
     }
-    fn op_ld(&mut self, r: Reg, v: u8) -> usize {
-        self.v[r.0] = v;
+    /// Op: Set Vx = v.
+    fn op_ld(&mut self, x: Reg, v: u8) -> usize {
+        self.v[x] = v;
         self.pc += 2;
         27
     }
-    fn op_ld_vx_k(&mut self, r: Reg) -> usize {
+    /// Op: Wait for a key press, store the value of the key in Vx.
+    fn op_ld_vx_k(&mut self, x: Reg) -> usize {
         for i in 0..0x10 {
-            if 1 << i & self.k != 0 {
-                self.v[r.0] = i as u8;
+            if 1 << i & self.keypad != 0 {
+                self.v[x] = i as u8;
                 self.pc += 2;
                 break;
             }
         }
         200
     }
+    /// Op: Set delay timer = Vx.
     fn op_ld_dt(&mut self, v: u8) -> usize {
         self.dt = v;
         self.pc += 2;
         45
     }
+    /// Op: Set sound timer = Vx.
     fn op_ld_st(&mut self, v: u8) -> usize {
         self.st = v;
         self.pc += 2;
         45
     }
+    /// Op: Set I = location of sprite for digit v.
     fn op_ld_f(&mut self, v: u8) -> usize {
         self.i = SPRITE_CHARS_ADDR + v as u16 * 5;
         self.pc += 2;
         91
     }
+    /// Op: Store BCD representation of v in memory locations I, I+1, and I+2.
+    #[allow(clippy::identity_op)]
     fn op_ld_b(&mut self, v: u8) -> usize {
         let d2 = v / 100;
         let v = v - d2 * 100;
@@ -228,89 +268,103 @@ impl<R: RngCore> Chip8<R> {
         self.pc += 2;
         927
     }
+    /// Op: Store registers V0 through Vx in memory starting at location I.
     fn op_ld_i_vx(&mut self, x: u8) -> usize {
         for i in 0..x + 1 {
-            self.mem[self.i as usize + i as usize] = self.v[i];
+            self.mem[self.i as usize + i as usize] = self.v[Reg(i)];
         }
         self.pc += 2;
         605
     }
+    /// Op: Read registers V0 through Vx from memory starting at location I.
     fn op_ld_vx_i(&mut self, x: u8) -> usize {
         for i in 0..x + 1 {
-            self.v[i] = self.mem[self.i as usize + i as usize];
+            self.v[Reg(i)] = self.mem[self.i as usize + i as usize];
         }
         self.pc += 2;
         605
     }
-    fn op_add(&mut self, a: Reg, b: u8) -> usize {
-        let (res, overflow) = self.v[a.0].overflowing_add(b);
-        self.v[a.0] = res;
-        self.v[0xf] = if overflow { 1 } else { 0 };
+    /// Op: Set Vx = Vx + b.
+    fn op_add(&mut self, x: Reg, b: u8) -> usize {
+        let (res, overflow) = self.v[x].overflowing_add(b);
+        self.v[x] = res;
+        self.v[Reg(0xf)] = if overflow { 1 } else { 0 };
         self.pc += 2;
         45
     }
+    /// Op: Set I = I + b.
     fn op_add16(&mut self, b: u8) -> usize {
         self.i += b as u16;
         self.pc += 2;
         86
     }
-    fn op_or(&mut self, a: Reg, b: u8) -> usize {
-        self.v[a.0] |= b;
+    /// Op: Set Vx = Vx OR b.
+    fn op_or(&mut self, x: Reg, b: u8) -> usize {
+        self.v[x] |= b;
         self.pc += 2;
         200
     }
-    fn op_and(&mut self, a: Reg, b: u8) -> usize {
-        self.v[a.0] &= b;
+    /// Op: Set Vx = Vx AND b.
+    fn op_and(&mut self, x: Reg, b: u8) -> usize {
+        self.v[x] &= b;
         self.pc += 2;
         200
     }
-    fn op_xor(&mut self, a: Reg, b: u8) -> usize {
-        self.v[a.0] ^= b;
+    /// Op: Set Vx = Vx XOR b.
+    fn op_xor(&mut self, x: Reg, b: u8) -> usize {
+        self.v[x] ^= b;
         self.pc += 2;
         200
     }
-    fn op_sub(&mut self, a: Reg, b: u8) -> usize {
-        let (res, overflow) = self.v[a.0].overflowing_sub(b);
-        self.v[a.0] = res;
-        self.v[0xf] = if overflow { 0 } else { 1 };
+    /// Op: Set Vx = Vx - b.
+    fn op_sub(&mut self, x: Reg, b: u8) -> usize {
+        let (res, overflow) = self.v[x].overflowing_sub(b);
+        self.v[x] = res;
+        self.v[Reg(0xf)] = if overflow { 0 } else { 1 };
         self.pc += 2;
         200
     }
-    fn op_subn(&mut self, a: Reg, b: u8) -> usize {
-        let (res, overflow) = b.overflowing_sub(self.v[a.0]);
-        self.v[a.0] = res;
-        self.v[0xf] = if overflow { 0 } else { 1 };
+    /// Op: Set Vx = b - Vx, set Vf = NOT borrow.
+    fn op_subn(&mut self, x: Reg, b: u8) -> usize {
+        let (res, overflow) = b.overflowing_sub(self.v[x]);
+        self.v[x] = res;
+        self.v[Reg(0xf)] = if overflow { 0 } else { 1 };
         self.pc += 2;
         200
     }
-    fn op_shr(&mut self, a: Reg) -> usize {
-        let (res, overflow) = self.v[a.0].overflowing_shr(1);
-        self.v[a.0] = res;
-        self.v[0xf] = if overflow { 1 } else { 0 };
+    /// Op: Set Vx = Vx >> 1.
+    fn op_shr(&mut self, x: Reg) -> usize {
+        let (res, overflow) = self.v[x].overflowing_shr(1);
+        self.v[x] = res;
+        self.v[Reg(0xf)] = if overflow { 1 } else { 0 };
         self.pc += 2;
         200
     }
-    fn op_shl(&mut self, a: Reg) -> usize {
-        let (res, overflow) = self.v[a.0].overflowing_shl(1);
-        self.v[a.0] = res;
-        self.v[0xf] = if overflow { 1 } else { 0 };
+    /// Op: Set Vx = Vx << 1.
+    fn op_shl(&mut self, x: Reg) -> usize {
+        let (res, overflow) = self.v[x].overflowing_shl(1);
+        self.v[x] = res;
+        self.v[Reg(0xf)] = if overflow { 1 } else { 0 };
         self.pc += 2;
         200
     }
+    /// Op: Set I = addr
     fn op_ld_i(&mut self, addr: u16) -> usize {
         self.i = addr;
         self.pc += 2;
         55
     }
-    fn op_rnd(&mut self, r: Reg, v: u8) -> usize {
-        self.v[r.0] = (self.rng.next_u32() as u8) & v;
+    /// Op: Set Vx = random byte AND v
+    fn op_rnd(&mut self, x: Reg, v: u8) -> usize {
+        self.v[x] = (self.rng.next_u32() as u8) & v;
         self.pc += 2;
         164
     }
+    /// Op: Display n-byte sprite starting at memory location I at (Vx, Vy), set VF = collision.
     fn op_drw(&mut self, pos_x: u8, pos_y: u8, n: u8) -> usize {
         let pos_x = pos_x % 64;
         let pos_y = pos_y % 32;
-        let mut fb = &mut self.fb;
+        let fb = &mut self.fb;
         let shift = pos_x % 8;
         let col_a = pos_x as usize / 8;
         let col_b = (col_a + 1) % (SCREEN_WIDTH / 8);
@@ -329,26 +383,30 @@ impl<R: RngCore> Chip8<R> {
                 *fb_b ^= b;
             }
         }
-        self.v[0xF] = if collision != 0 { 1 } else { 0 };
+        self.v[Reg(0xf)] = if collision != 0 { 1 } else { 0 };
         self.pc += 2;
         22734
     }
+    /// Op: Skip next instruction if key with the value of v is pressed.
     fn op_skp(&mut self, v: u8) -> usize {
-        if 1 << v & self.k != 0 {
+        if 1 << v & self.keypad != 0 {
             self.pc += 4;
         } else {
             self.pc += 2;
         }
         73
     }
+    /// Op: Skip next instruction if key with the value of v is not pressed.
     fn op_sknp(&mut self, v: u8) -> usize {
-        if 1 << v & self.k == 0 {
+        if 1 << v & self.keypad == 0 {
             self.pc += 4;
         } else {
             self.pc += 2;
         }
         73
     }
+
+    /// Execute the instruction defined by (w0, w1).  Returns the number of microseconds elapsed.
     fn exec(&mut self, w0: u8, w1: u8) -> Result<usize, Error> {
         Ok(match w0 & 0xf0 {
             0x00 => match w1 {
@@ -358,16 +416,16 @@ impl<R: RngCore> Chip8<R> {
             },
             0x10 => self.op_jp(nnn!(w0, w1)),
             0x20 => self.op_call(nnn!(w0, w1)),
-            0x30 => self.op_se(self.v[w0 & 0x0f], w1),
-            0x40 => self.op_sne(self.v[w0 & 0x0f], w1),
-            0x50 => self.op_se(self.v[w0 & 0x0f], self.v[(w1 & 0xf0) >> 4]),
+            0x30 => self.op_se(self.v[Reg(lo_nib(w0))], w1),
+            0x40 => self.op_sne(self.v[Reg(lo_nib(w0))], w1),
+            0x50 => self.op_se(self.v[Reg(lo_nib(w0))], self.v[Reg(hi_nib(w1))]),
             0x60 => self.op_ld(Reg(w0 & 0x0f), w1),
             0x70 => self.op_add(Reg(w0 & 0x0f), w1),
             0x80 => {
-                let a = Reg(w0 & 0x0f);
-                let b = self.v[(w1 & 0xf0) >> 4];
+                let a = Reg(lo_nib(w0));
+                let b = self.v[Reg(hi_nib(w1))];
                 match w1 & 0x0f {
-                    0x00 => self.op_ld(Reg(w0 & 0x0f), b),
+                    0x00 => self.op_ld(a, b),
                     0x01 => self.op_or(a, b),
                     0x02 => self.op_and(a, b),
                     0x03 => self.op_xor(a, b),
@@ -380,28 +438,28 @@ impl<R: RngCore> Chip8<R> {
                 }
             }
             0x90 => match w1 & 0x0f {
-                0x00 => self.op_sne(self.v[w0 & 0x0f], self.v[(w1 & 0xf0) >> 4]),
+                0x00 => self.op_sne(self.v[Reg(lo_nib(w0))], self.v[Reg(hi_nib(w1))]),
                 _ => return Err(Error::InvalidOp(w0, w1)),
             },
             0xA0 => self.op_ld_i(nnn!(w0, w1)),
-            0xB0 => self.op_jp(self.v[0] as u16 + nnn!(w0, w1)),
-            0xC0 => self.op_rnd(Reg(w0 & 0x0f), w1),
-            0xD0 => self.op_drw(self.v[w0 & 0x0f], self.v[(w1 & 0xf0) >> 4], w1 & 0x0f),
+            0xB0 => self.op_jp(self.v[Reg(0)] as u16 + nnn!(w0, w1)),
+            0xC0 => self.op_rnd(Reg(lo_nib(w0)), w1),
+            0xD0 => self.op_drw(self.v[Reg(lo_nib(w0))], self.v[Reg(hi_nib(w1))], lo_nib(w1)),
             0xE0 => match w1 {
-                0x9E => self.op_skp(self.v[w0 & 0x0f]),
-                0xA1 => self.op_sknp(self.v[w0 & 0x0f]),
+                0x9E => self.op_skp(self.v[Reg(lo_nib(w0))]),
+                0xA1 => self.op_sknp(self.v[Reg(lo_nib(w0))]),
                 _ => return Err(Error::InvalidOp(w0, w1)),
             },
             0xF0 => match w1 {
-                0x07 => self.op_ld(Reg(w0 & 0x0f), self.dt),
-                0x0A => self.op_ld_vx_k(Reg(w0 & 0x0f)),
-                0x15 => self.op_ld_dt(self.v[w0 & 0x0f]),
-                0x18 => self.op_ld_st(self.v[w0 & 0x0f]),
-                0x1E => self.op_add16(self.v[w0 & 0x0f]),
-                0x29 => self.op_ld_f(self.v[w0 & 0x0f]),
-                0x33 => self.op_ld_b(self.v[w0 & 0x0f]),
-                0x55 => self.op_ld_i_vx(w0 & 0x0f),
-                0x65 => self.op_ld_vx_i(w0 & 0x0f),
+                0x07 => self.op_ld(Reg(lo_nib(w0)), self.dt),
+                0x0A => self.op_ld_vx_k(Reg(lo_nib(w0))),
+                0x15 => self.op_ld_dt(self.v[Reg(lo_nib(w0))]),
+                0x18 => self.op_ld_st(self.v[Reg(lo_nib(w0))]),
+                0x1E => self.op_add16(self.v[Reg(lo_nib(w0))]),
+                0x29 => self.op_ld_f(self.v[Reg(lo_nib(w0))]),
+                0x33 => self.op_ld_b(self.v[Reg(lo_nib(w0))]),
+                0x55 => self.op_ld_i_vx(lo_nib(w0)),
+                0x65 => self.op_ld_vx_i(lo_nib(w0)),
                 _ => return Err(Error::InvalidOp(w0, w1)),
             },
             _ => return Err(Error::InvalidOp(w0, w1)),

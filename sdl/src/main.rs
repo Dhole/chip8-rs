@@ -3,12 +3,11 @@ use chip8::{self, Chip8};
 use sdl2::audio::{AudioCallback, AudioSpecDesired};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::pixels::Color;
-use sdl2::rect::Rect;
+use sdl2::pixels::{Color, PixelFormatEnum};
 
 use rand::{self, RngCore};
 
-use clap::{App, Arg, SubCommand};
+use clap::{App, Arg};
 
 use std::fs;
 use std::io::{self, Read};
@@ -88,17 +87,15 @@ pub fn main() -> Result<(), FrontError> {
 
     let scale = app
         .value_of("scale")
-        .map(|s| s.parse::<u32>().unwrap())
-        .unwrap();
-    let path = app.value_of("path").unwrap();
+        .map(|s| s.parse::<u32>().expect("scale flag can be parsed as u32"))
+        .expect("scale argument is defined");
+    let path = app.value_of("path").expect("path argument is defined");
 
     let mut rom = Vec::new();
     fs::OpenOptions::new()
         .read(true)
         .open(path)?
         .read_to_end(&mut rom)?;
-
-    // println!("rom {:02x}{:02x}", rom[0], rom[1]);
 
     let mut chip8 = Chip8::new(rand::random());
     chip8.load_rom(&rom)?;
@@ -108,7 +105,7 @@ pub fn main() -> Result<(), FrontError> {
 fn run<R: RngCore>(scale: u32, chip8: &mut Chip8<R>) -> Result<(), FrontError> {
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
-    let audio_subsystem = sdl_context.audio().unwrap();
+    let audio_subsystem = sdl_context.audio()?;
 
     let desired_spec = AudioSpecDesired {
         freq: Some(44100),
@@ -116,16 +113,14 @@ fn run<R: RngCore>(scale: u32, chip8: &mut Chip8<R>) -> Result<(), FrontError> {
         samples: None,     // default sample size
     };
 
-    let device = audio_subsystem
-        .open_playback(None, &desired_spec, |spec| {
-            // initialize the audio callback
-            SquareWave {
-                phase_inc: 440.0 / spec.freq as f32,
-                phase: 0.0,
-                volume: 0.25,
-            }
-        })
-        .unwrap();
+    let device = audio_subsystem.open_playback(None, &desired_spec, |spec| {
+        // initialize the audio callback
+        SquareWave {
+            phase_inc: 440.0 / spec.freq as f32,
+            phase: 0.0,
+            volume: 0.25,
+        }
+    })?;
 
     let window = video_subsystem
         .window(
@@ -139,15 +134,22 @@ fn run<R: RngCore>(scale: u32, chip8: &mut Chip8<R>) -> Result<(), FrontError> {
         .map_err(|e| e.to_string())?;
 
     let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
-
     canvas.set_draw_color(Color::RGB(0, 0, 0));
     canvas.clear();
     canvas.present();
+
+    let texture_creator = canvas.texture_creator();
+    let mut tex_display = texture_creator
+        .create_texture_streaming(
+            PixelFormatEnum::RGB24,
+            chip8::SCREEN_WIDTH as u32,
+            chip8::SCREEN_HEIGTH as u32,
+        )
+        .map_err(|e| e.to_string())?;
+
     let mut event_pump = sdl_context.event_pump()?;
 
-    let mut fb_prev = [0; chip8::SCREEN_HEIGTH * chip8::SCREEN_WIDTH / 8];
-
-    let mut k = 0 as u16;
+    let mut keypad = 0u16;
     'running: loop {
         for event in event_pump.poll_iter() {
             match event {
@@ -160,7 +162,7 @@ fn run<R: RngCore>(scale: u32, chip8: &mut Chip8<R>) -> Result<(), FrontError> {
                     keycode: Some(keycode),
                     ..
                 } => {
-                    k |= match keycode {
+                    keypad |= match keycode {
                         Keycode::Num1 => 1 << 0x1,
                         Keycode::Num2 => 1 << 0x2,
                         Keycode::Num3 => 1 << 0x3,
@@ -184,7 +186,7 @@ fn run<R: RngCore>(scale: u32, chip8: &mut Chip8<R>) -> Result<(), FrontError> {
                     keycode: Some(keycode),
                     ..
                 } => {
-                    k &= !match keycode {
+                    keypad &= !match keycode {
                         Keycode::Num1 => 1 << 0x1,
                         Keycode::Num2 => 1 << 0x2,
                         Keycode::Num3 => 1 << 0x3,
@@ -208,39 +210,57 @@ fn run<R: RngCore>(scale: u32, chip8: &mut Chip8<R>) -> Result<(), FrontError> {
             }
         }
 
-        chip8.k = k;
-        let out = chip8.frame(16666)?;
-        if out.tone {
+        chip8.frame(keypad)?;
+        if chip8.tone() {
             device.resume();
         } else {
             device.pause();
         }
 
-        canvas.set_draw_color(Color::RGB(0, 0, 0));
-        canvas.clear();
-        canvas.set_draw_color(Color::RGB(255, 255, 255));
+        // tex_display.with_lock(None, |buffer: &mut [u8], pitch: usize| {
+        //     for y in 0..chip8::SCREEN_HEIGTH {
+        //         for x in 0..chip8::SCREEN_WIDTH / 8 {
+        //             let byte = chip8.fb()[y * chip8::SCREEN_WIDTH / 8 + x];
+        //             for i in 0..8 {
+        //                 let offset = y * pitch + (x * 8 + i) * 3;
+        //                 let v = if byte & 1 << (7 - i) != 0 { 255 } else { 0 };
+        //                 buffer[offset] = v;
+        //                 buffer[offset + 1] = v;
+        //                 buffer[offset + 2] = v;
+        //             }
+        //         }
+        //     }
+        // })?;
 
-        for y in 0..chip8::SCREEN_HEIGTH {
-            for x in 0..chip8::SCREEN_WIDTH / 8 {
-                let byte = chip8.fb[y * chip8::SCREEN_WIDTH / 8 + x]
-                    | fb_prev[y * chip8::SCREEN_WIDTH / 8 + x];
-                for i in 0..8 {
-                    if byte & 1 << (7 - i) != 0 {
-                        canvas.fill_rect(Rect::new(
-                            (x * 8 + i) as i32 * scale as i32,
-                            y as i32 * scale as i32,
-                            scale,
-                            scale,
-                        ))?;
+        tex_display.with_lock(None, |buffer: &mut [u8], pitch: usize| {
+            for y in 0..chip8::SCREEN_HEIGTH {
+                for x in 0..chip8::SCREEN_WIDTH / 8 {
+                    let byte = chip8.fb()[y * chip8::SCREEN_WIDTH / 8 + x];
+                    for i in 0..8 {
+                        let offset = y * pitch + (x * 8 + i) * 3;
+                        let on = if byte & 1 << (7 - i) != 0 {
+                            true
+                        } else {
+                            false
+                        };
+                        const FACTOR: u8 = 30;
+                        let v = if on {
+                            255
+                        } else {
+                            buffer[offset].saturating_sub(FACTOR)
+                        };
+                        buffer[offset] = v;
+                        buffer[offset + 1] = v;
+                        buffer[offset + 2] = v;
                     }
                 }
             }
-        }
-        fb_prev.copy_from_slice(&chip8.fb);
+        })?;
 
+        canvas.clear();
+        canvas.copy(&tex_display, None, None)?;
         canvas.present();
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
-        // The rest of the game loop goes here...
     }
 
     Ok(())
