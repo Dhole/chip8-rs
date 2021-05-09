@@ -89,7 +89,7 @@ pub struct Chip8<R: RngCore> {
     fb: [u8; SCREEN_WIDTH * SCREEN_HEIGTH / 8], // Framebuffer
     tone: bool,                                 // Tone output enable
     time: isize,                                // Overtime in microseconds
-    rng: R,
+    rng: R,                                     // Instance of a random number generator
 }
 
 macro_rules! nnn {

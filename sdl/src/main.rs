@@ -11,7 +11,7 @@ use clap::{App, Arg};
 
 use std::fs;
 use std::io::{self, Read};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 pub enum FrontError {
@@ -149,6 +149,8 @@ fn run<R: RngCore>(scale: u32, chip8: &mut Chip8<R>) -> Result<(), FrontError> {
 
     let mut event_pump = sdl_context.event_pump()?;
 
+    let frame_duration = Duration::new(0, 1_000_000_000u32 / 60);
+    let mut timestamp = Instant::now();
     let mut keypad = 0u16;
     'running: loop {
         for event in event_pump.poll_iter() {
@@ -260,7 +262,12 @@ fn run<R: RngCore>(scale: u32, chip8: &mut Chip8<R>) -> Result<(), FrontError> {
         canvas.clear();
         canvas.copy(&tex_display, None, None)?;
         canvas.present();
-        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+        let now = Instant::now();
+        let sleep_dur = frame_duration
+            .checked_sub(now.saturating_duration_since(timestamp))
+            .unwrap_or(Duration::new(0, 0));
+        ::std::thread::sleep(sleep_dur);
+        timestamp = now;
     }
 
     Ok(())
