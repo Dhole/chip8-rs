@@ -20,54 +20,54 @@ use hal::delay::Delay;
 use hal::spi::{self, Spi};
 use hal::timer::{Tim2NoRemap, Tim3NoRemap, Timer};
 
-use arrayvec::{ArrayString, ArrayVec};
+use arrayvec::ArrayString;
 
 use pcd8544_hal::{self, Pcd8544, Pcd8544Spi};
 
 use chip8::{self, Chip8};
-static ROM_GUESS: &'static [u8] = include_bytes!("../../games/GUESS");
-static ROM_VBRIX: &'static [u8] = include_bytes!("../../games/VBRIX");
-static ROM_SYZYGY: &'static [u8] = include_bytes!("../../games/SYZYGY");
-static ROM_KALEID: &'static [u8] = include_bytes!("../../games/KALEID");
-static ROM_AIRPLANE_CH8: &'static [u8] = include_bytes!("../../games/Airplane.ch8");
-static ROM_CAVE_CH8: &'static [u8] = include_bytes!("../../games/Cave.ch8");
-static ROM_TEST_OPCODE_CH8: &'static [u8] = include_bytes!("../../games/test_opcode.ch8");
-static ROM_SHOOTINGSTARS_CH8: &'static [u8] = include_bytes!("../../games/ShootingStars.ch8");
-static ROM_BOWLING_CH8: &'static [u8] = include_bytes!("../../games/Bowling.ch8");
-static ROM_TICTAC: &'static [u8] = include_bytes!("../../games/TICTAC");
-static ROM_CONNECT4: &'static [u8] = include_bytes!("../../games/CONNECT4");
-static ROM_SUBMARINE_CH8: &'static [u8] = include_bytes!("../../games/Submarine.ch8");
-static ROM_TRON_CH8: &'static [u8] = include_bytes!("../../games/Tron.ch8");
-static ROM_UFO: &'static [u8] = include_bytes!("../../games/UFO");
-static ROM_PADDLES_CH8: &'static [u8] = include_bytes!("../../games/Paddles.ch8");
-static ROM_HILO_CH8: &'static [u8] = include_bytes!("../../games/HiLo.ch8");
-static ROM_BLITZ: &'static [u8] = include_bytes!("../../games/BLITZ");
-static ROM_SOCCER_CH8: &'static [u8] = include_bytes!("../../games/Soccer.ch8");
-static ROM_BRIX: &'static [u8] = include_bytes!("../../games/BRIX");
-static ROM_BLINKY: &'static [u8] = include_bytes!("../../games/BLINKY");
-static ROM_HIDDEN: &'static [u8] = include_bytes!("../../games/HIDDEN");
-static ROM_PONG2: &'static [u8] = include_bytes!("../../games/PONG2");
-static ROM_TETRIS: &'static [u8] = include_bytes!("../../games/TETRIS");
-static ROM_MAZE: &'static [u8] = include_bytes!("../../games/MAZE");
-static ROM_SPACEINTERCEPT_CH8: &'static [u8] = include_bytes!("../../games/SpaceIntercept.ch8");
-static ROM_BLINKY_CH8: &'static [u8] = include_bytes!("../../games/Blinky.ch8");
-static ROM_PUZZLE: &'static [u8] = include_bytes!("../../games/PUZZLE");
-static ROM_FILTER_CH8: &'static [u8] = include_bytes!("../../games/Filter.ch8");
-static ROM_MERLIN: &'static [u8] = include_bytes!("../../games/MERLIN");
-static ROM_MISSILE: &'static [u8] = include_bytes!("../../games/MISSILE");
-static ROM_15PUZZLE: &'static [u8] = include_bytes!("../../games/15PUZZLE");
-static ROM_LANDING_CH8: &'static [u8] = include_bytes!("../../games/Landing.ch8");
-static ROM_PONG: &'static [u8] = include_bytes!("../../games/PONG");
-static ROM_INVADERS: &'static [u8] = include_bytes!("../../games/INVADERS");
-static ROM_WIPEOFF: &'static [u8] = include_bytes!("../../games/WIPEOFF");
-static ROM_ASTRODODGE_CH8: &'static [u8] = include_bytes!("../../games/AstroDodge.ch8");
-static ROM_SPACEFLIGHT_CH8: &'static [u8] = include_bytes!("../../games/SpaceFlight.ch8");
-static ROM_WORM_CH8: &'static [u8] = include_bytes!("../../games/Worm.ch8");
-static ROM_VERS: &'static [u8] = include_bytes!("../../games/VERS");
-static ROM_HIDDEN_CH8: &'static [u8] = include_bytes!("../../games/Hidden.ch8");
-static ROM_LUNARLANDER_CH8: &'static [u8] = include_bytes!("../../games/LunarLander.ch8");
-static ROM_SQUASH_CH8: &'static [u8] = include_bytes!("../../games/Squash.ch8");
-static ROM_TANK: &'static [u8] = include_bytes!("../../games/TANK");
+static ROM_GUESS: &[u8] = include_bytes!("../../games/GUESS");
+static ROM_VBRIX: &[u8] = include_bytes!("../../games/VBRIX");
+static ROM_SYZYGY: &[u8] = include_bytes!("../../games/SYZYGY");
+static ROM_KALEID: &[u8] = include_bytes!("../../games/KALEID");
+static ROM_AIRPLANE_CH8: &[u8] = include_bytes!("../../games/Airplane.ch8");
+static ROM_CAVE_CH8: &[u8] = include_bytes!("../../games/Cave.ch8");
+static ROM_TEST_OPCODE_CH8: &[u8] = include_bytes!("../../games/test_opcode.ch8");
+static ROM_SHOOTINGSTARS_CH8: &[u8] = include_bytes!("../../games/ShootingStars.ch8");
+static ROM_BOWLING_CH8: &[u8] = include_bytes!("../../games/Bowling.ch8");
+static ROM_TICTAC: &[u8] = include_bytes!("../../games/TICTAC");
+static ROM_CONNECT4: &[u8] = include_bytes!("../../games/CONNECT4");
+static ROM_SUBMARINE_CH8: &[u8] = include_bytes!("../../games/Submarine.ch8");
+static ROM_TRON_CH8: &[u8] = include_bytes!("../../games/Tron.ch8");
+static ROM_UFO: &[u8] = include_bytes!("../../games/UFO");
+static ROM_PADDLES_CH8: &[u8] = include_bytes!("../../games/Paddles.ch8");
+static ROM_HILO_CH8: &[u8] = include_bytes!("../../games/HiLo.ch8");
+static ROM_BLITZ: &[u8] = include_bytes!("../../games/BLITZ");
+static ROM_SOCCER_CH8: &[u8] = include_bytes!("../../games/Soccer.ch8");
+static ROM_BRIX: &[u8] = include_bytes!("../../games/BRIX");
+static ROM_BLINKY: &[u8] = include_bytes!("../../games/BLINKY");
+static ROM_HIDDEN: &[u8] = include_bytes!("../../games/HIDDEN");
+static ROM_PONG2: &[u8] = include_bytes!("../../games/PONG2");
+static ROM_TETRIS: &[u8] = include_bytes!("../../games/TETRIS");
+static ROM_MAZE: &[u8] = include_bytes!("../../games/MAZE");
+static ROM_SPACEINTERCEPT_CH8: &[u8] = include_bytes!("../../games/SpaceIntercept.ch8");
+static ROM_BLINKY_CH8: &[u8] = include_bytes!("../../games/Blinky.ch8");
+static ROM_PUZZLE: &[u8] = include_bytes!("../../games/PUZZLE");
+static ROM_FILTER_CH8: &[u8] = include_bytes!("../../games/Filter.ch8");
+static ROM_MERLIN: &[u8] = include_bytes!("../../games/MERLIN");
+static ROM_MISSILE: &[u8] = include_bytes!("../../games/MISSILE");
+static ROM_15PUZZLE: &[u8] = include_bytes!("../../games/15PUZZLE");
+static ROM_LANDING_CH8: &[u8] = include_bytes!("../../games/Landing.ch8");
+static ROM_PONG: &[u8] = include_bytes!("../../games/PONG");
+static ROM_INVADERS: &[u8] = include_bytes!("../../games/INVADERS");
+static ROM_WIPEOFF: &[u8] = include_bytes!("../../games/WIPEOFF");
+static ROM_ASTRODODGE_CH8: &[u8] = include_bytes!("../../games/AstroDodge.ch8");
+static ROM_SPACEFLIGHT_CH8: &[u8] = include_bytes!("../../games/SpaceFlight.ch8");
+static ROM_WORM_CH8: &[u8] = include_bytes!("../../games/Worm.ch8");
+static ROM_VERS: &[u8] = include_bytes!("../../games/VERS");
+static ROM_HIDDEN_CH8: &[u8] = include_bytes!("../../games/Hidden.ch8");
+static ROM_LUNARLANDER_CH8: &[u8] = include_bytes!("../../games/LunarLander.ch8");
+static ROM_SQUASH_CH8: &[u8] = include_bytes!("../../games/Squash.ch8");
+static ROM_TANK: &[u8] = include_bytes!("../../games/TANK");
 
 const SYSCLK: u32 = 72_000_000;
 
@@ -75,8 +75,8 @@ fn key_pressed<O: OutputPin, I: InputPin>(r: &mut [O; 4], c: &mut [I; 4]) -> u16
     for pin in r.iter_mut() {
         pin.set_low().ok().unwrap();
     }
-    for y in 0..4 {
-        r[y].set_high().ok().unwrap();
+    for (y, ry) in r.iter_mut().enumerate() {
+        ry.set_high().ok().unwrap();
         let is_high = [
             c[0].is_high().ok().unwrap(),
             c[1].is_high().ok().unwrap(),
@@ -88,7 +88,7 @@ fn key_pressed<O: OutputPin, I: InputPin>(r: &mut [O; 4], c: &mut [I; 4]) -> u16
                 return 1 << (y * 4 + x);
             }
         }
-        r[y].set_low().ok().unwrap();
+        ry.set_low().ok().unwrap();
     }
     0
 }
@@ -197,8 +197,8 @@ fn main() -> ! {
     // );
 
     // other pins for PCD8544
-    let mut dc = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
-    let mut cs = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
+    let dc = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
+    let cs = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
     let mut rst = gpioa.pa1.into_push_pull_output(&mut gpioa.crl);
 
     let mut pcd8544 = Pcd8544Spi::new(spi, dc, cs, &mut rst, &mut delay);
@@ -219,7 +219,7 @@ fn main() -> ! {
     // TIM2 PWM
     let c1 = gpioa.pa0.into_alternate_push_pull(&mut gpioa.crl);
     let mut pwm_tone = Timer::tim2(dp.TIM2, &clocks, &mut rcc.apb1).pwm::<Tim2NoRemap, _, _, _>(
-        (c1),
+        c1,
         &mut afio.mapr,
         440.hz(),
     );
@@ -229,21 +229,21 @@ fn main() -> ! {
     // TIM3 PWM
     let c4 = gpiob.pb1.into_alternate_push_pull(&mut gpiob.crl);
     let mut pwm_light = Timer::tim3(dp.TIM3, &clocks, &mut rcc.apb1).pwm::<Tim3NoRemap, _, _, _>(
-        (c4),
+        c4,
         &mut afio.mapr,
         8.khz(),
     );
     let max_light = pwm_light.get_max_duty();
-    const light_levels: u16 = 4;
-    pwm_light.set_duty(max_light / light_levels * light_levels);
+    const LIGHT_LEVELS: u16 = 4;
+    pwm_light.set_duty(max_light / LIGHT_LEVELS * LIGHT_LEVELS);
     pwm_light.enable();
 
     let syst = delay.free();
     let mut timer = Timer::syst(syst, &clocks).start_count_down(60.hz());
 
-    led.set_high();
+    led.set_high().unwrap();
 
-    let ROMS = [
+    let roms = [
         ("GUESS", ROM_GUESS),
         ("VBRIX", ROM_VBRIX),
         ("SYZYGY", ROM_SYZYGY),
@@ -299,42 +299,41 @@ fn main() -> ! {
         let key = key_pressed(&mut keypad_r, &mut keypad_c);
         if key_prev == 0 {
             if key == KEY_C {
-                light = core::cmp::min(light_levels as i16, light + 1);
+                light = core::cmp::min(LIGHT_LEVELS as i16, light + 1);
             } else if key == KEY_D {
                 light = core::cmp::max(0, light - 1);
             } else if key == KEY_8 {
-                rom_n = (rom_n + 1) % ROMS.len() as i16;
+                rom_n = (rom_n + 1) % roms.len() as i16;
             } else if key == KEY_2 {
-                rom_n = rom_n - 1;
+                rom_n -= rom_n;
                 if rom_n < 0 {
-                    rom_n = ROMS.len() as i16 - 1;
+                    rom_n = roms.len() as i16 - 1;
                 }
             } else if key == KEY_5 {
                 break;
             }
         }
 
-        pwm_light.set_duty(max_light / light_levels * (light_levels - light as u16));
+        pwm_light.set_duty(max_light / LIGHT_LEVELS * (LIGHT_LEVELS - light as u16));
 
         pcd8544.clear();
         msg.clear();
-        write!(msg, "light: {}", light);
+        write!(msg, "light: {}", light).unwrap();
         pcd8544.set_position(0, 0);
         pcd8544.print(&msg);
         msg.clear();
-        write!(msg, "{:02}: {}", rom_n, ROMS[rom_n as usize].0);
+        write!(msg, "{:02}: {}", rom_n, roms[rom_n as usize].0).unwrap();
         pcd8544.set_position(0, 2);
         pcd8544.print(&msg);
 
-        led.toggle();
+        led.toggle().unwrap();
         key_prev = key;
     }
 
     let mut chip8 = Chip8::new(DWT::get_cycle_count() as u64);
-    chip8.load_rom(ROMS[rom_n as usize].1).unwrap();
+    chip8.load_rom(roms[rom_n as usize].1).unwrap();
 
     // chip8 loop
-    const frame_us: usize = 1_000_000 / 60;
 
     const DISP_WIDTH: usize = 84;
     const DISP_HEIGHT: usize = 48;
@@ -369,6 +368,6 @@ fn main() -> ! {
         }
         fb_prev.copy_from_slice(&chip8.fb());
         pcd8544.draw_buffer(&disp_fb);
-        led.toggle();
+        led.toggle().unwrap();
     }
 }
