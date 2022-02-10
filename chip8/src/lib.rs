@@ -285,10 +285,12 @@ impl<R: RngCore> Chip8<R> {
         605
     }
     /// Op: Set Vx = Vx + b.
-    fn op_add(&mut self, x: Reg, b: u8) -> usize {
+    fn op_add(&mut self, x: Reg, b: u8, set_overflow: bool) -> usize {
         let (res, overflow) = self.v[x].overflowing_add(b);
         self.v[x] = res;
-        self.v[Reg(0xf)] = if overflow { 1 } else { 0 };
+        if set_overflow {
+            self.v[Reg(0xf)] = if overflow { 1 } else { 0 };
+        }
         self.pc += 2;
         45
     }
@@ -334,17 +336,17 @@ impl<R: RngCore> Chip8<R> {
     }
     /// Op: Set Vx = Vx >> 1.
     fn op_shr(&mut self, x: Reg) -> usize {
-        let (res, overflow) = self.v[x].overflowing_shr(1);
+        self.v[Reg(0xf)] = self.v[x] & 0b00000001;
+        let (res, _) = self.v[x].overflowing_shr(1);
         self.v[x] = res;
-        self.v[Reg(0xf)] = if overflow { 1 } else { 0 };
         self.pc += 2;
         200
     }
     /// Op: Set Vx = Vx << 1.
     fn op_shl(&mut self, x: Reg) -> usize {
-        let (res, overflow) = self.v[x].overflowing_shl(1);
+        self.v[Reg(0xf)] = (self.v[x] & 0b10000000) >> 7;
+        let (res, _) = self.v[x].overflowing_shl(1);
         self.v[x] = res;
-        self.v[Reg(0xf)] = if overflow { 1 } else { 0 };
         self.pc += 2;
         200
     }
@@ -420,7 +422,7 @@ impl<R: RngCore> Chip8<R> {
             0x40 => self.op_sne(self.v[Reg(lo_nib(w0))], w1),
             0x50 => self.op_se(self.v[Reg(lo_nib(w0))], self.v[Reg(hi_nib(w1))]),
             0x60 => self.op_ld(Reg(w0 & 0x0f), w1),
-            0x70 => self.op_add(Reg(w0 & 0x0f), w1),
+            0x70 => self.op_add(Reg(w0 & 0x0f), w1, false),
             0x80 => {
                 let a = Reg(lo_nib(w0));
                 let b = self.v[Reg(hi_nib(w1))];
@@ -429,7 +431,7 @@ impl<R: RngCore> Chip8<R> {
                     0x01 => self.op_or(a, b),
                     0x02 => self.op_and(a, b),
                     0x03 => self.op_xor(a, b),
-                    0x04 => self.op_add(a, b),
+                    0x04 => self.op_add(a, b, true),
                     0x05 => self.op_sub(a, b),
                     0x06 => self.op_shr(a),
                     0x07 => self.op_subn(a, b),
